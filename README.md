@@ -24,6 +24,26 @@ Overall, this is more or less a 'toy' implementation.
 
 # Decoding
 
-(under construction)
+I haven't implemented the decoding process in the exact way as it was done in original model (truthfully, I do have some confusions about the exact details of the decoder in the original model - so I just made my own adjustments). 
+
+I iterated the decoder layers for max_len no. of times when max_len is the total output sequence length. At each iteration, an output vector is predicted in the form batch_size x model_dimensions (later to be linearly transformed to express a probability distribution over the vocabularies). At the end of each iterations, the currently prediced output is concatenated with the previously predicted output vectors to get a sequence of output vectors in the shape batch_size x sequence_length x model_dimensions.
+
+This newly formed sequence of vector is then fed to the decoder layer as input at the next iteration. Thus at each iteration, the sequence size of the input increases by one. 
+
+The first sublayer of the decoder unit of the original model is the masked multi-head self-attention. I didn't use any masking since at each iteration I only fed the array of previously computed outputs (computed by the network in the previous iterations). There will never be any subsequent output to attend to - preventing that was the original goal for masking. Thus, I didn't use any masking. 
+
+The decoder layers are such that if the input is in the shape batch_size x sequence_length x model_dimensions then the output will be of the same shape.
+
+But I needed a single output vector for each training data in the batch, that should represent the single next predicted word. That is, I needed a decoder output of shape batch_size x model_dimensions, but I get the shape: batch_size x sequence_length x model_dimensions. 
+
+Initially, I tried reducing batch_size x sequence_length x model_dimensions shaped tensor to a batch_size x model_dimensions shaped tensor by adding along axis 1. But, in order to make this transformation more flexible, I intended to reshape batch_size x sequence_length x model_dimensions to batch_size x (sequence_length x model_dimensions) and then do a linear transformation (pass through a fully connected feed forward network). However that was problematic since the sequence_length will increase at each iteration. So I chose to convert the output of shape batch_size x sequence_length x model_dimensions to  batch_size x max_len x model_dimensions (this shape will remain fixed at every iteration), by padding the missing values with zeros, and then fed it to a simple fully connected feed forward network to get the desired outcome: batch_size x model_dimensions. Next, I applied positional encoding to the result. After all these, we reach the end of the iteration where the current output is concatenated with the previous ones for the next loop. 
+
+The inital candidate output vector is initialized with ones for each data in the batch. This initial output vector is the first input to the first decoder sublayer of the first decoder layer of the first iteration.
+
+In the first iteration, I skipped the first self-attention sublayer of the first decoder layer, because at that moment there is only one unit-initialized output vector - so there's not much point for self attention.
+
+At the end of the first iteration, the predicted output is not concatenated with the initial output vector, rather, the initial unit-initalized output vector is replaced by the newly predicted output. So, there are some exceptions to the rules (as stated before) for the first iteration.  
+
+Finally all the predicted output vectors are converted to probability distributions from which predictions are made and losses are calculated for backpropagation. 
 
 Code to be uploaded soon. 
