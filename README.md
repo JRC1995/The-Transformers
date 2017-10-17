@@ -15,10 +15,10 @@ Unlike the previous models ([this](https://github.com/JRC1995/Abstractive-Summar
 
 Note:
 
-*I am using different hyperparameters. 
-*I am using low dimensional GloVe embeddings, and less no. of layers.
-*I haven't used regularization.
-*I will not be completely training this model for now. I will not be validating or testing either. 
+* I am using different hyperparameters. 
+* I am using low dimensional GloVe embeddings, and less no. of layers.
+* I haven't used regularization.
+* I will not be completely training this model for now. I will not be validating or testing either. 
 
 Overall, this is more or less a 'toy' implementation.
 
