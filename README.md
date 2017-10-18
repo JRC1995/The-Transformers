@@ -40,7 +40,7 @@ I reshaped the batch_size x max_len x model_dimensions shaped decoder output int
 decoderout = tf.reshape(decoderout,[batch_size,max_len*word_vec_dim])
 decoderout = tf.nn.relu(tf.matmul(decoderout,W)+B)
 ```
-I actually used two feedforward layer with a relu in between for the linear transformation. 
+I actually used two feedforward layers with a relu in between for the linear transformation. 
 
 After that, the decoder output is of the size batch_size x model_dimensions.
 This is then positionally encoded, concatenated with previous predictions and fed to the network in the next timestep.
