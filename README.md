@@ -32,11 +32,20 @@ This newly formed sequence of vector of shape batch_size x timestep x model_dime
 
 Masking was used so that the network doesn't attend to the padded word vectors beyond the current timestep position in the sequence. 
 
-The decoder layers are such that if the input is in the shape batch_size x sequence_length x model_dimensions then the output will be of the same shape. The input to the decoder is of the shape batch_size x max_len x model_dimensions, and thus the output is the same. From this decoder output, among the max_len no. of vectors (of dimensions: model_dimensions), I kept only the i-th (i = current timestep or iteration) vecrtor, for each example in the batch. This i-th vector represents the i-th predicted word. In code: 
+The decoder layers are such that if the input is in the shape batch_size x sequence_length x model_dimensions then the output will be of the same shape. The input to the decoder is of the shape batch_size x max_len x model_dimensions, and thus the output is the same. I added the decoder output tensor along axis 1 to transform it into a tensor of shape batch_size x model_dimensions. 
+
 ```
-decoderoutput = decoderoutput[:,i]
+decoderout = tf.reduce_sum(decoderout,1)
 ```
+
+Alternatively, I could have also reshaped the batch_size x max_len x model_dimensions shaped decoder output into batch_size x (max_len*model_dimensions) which can be linearly transformed to shape: batch_size x model_dimenions. 
+
+```
+decoderout = tf.reshape(decoderout,[batch_size,max_len*word_vec_dim])
+decoderout = tf.nn.relu(tf.matmul(decoderout,W)+B)
+```
+
 After that, decoder output is of the size batch_size x model_dimensions.
 This is then positionally encoded, concatenated with previous predictions and fed to the network in the next timestep.
 
-In the end of all the timesteps, each of these output vectors are later linearly transformed into probability distributions from which predictions are made and losses are calculated for backpropagation. 
+In the end of all the timesteps, each of these positionally encoded output vectors are linearly transformed into probability distributions from which predictions are made and losses are calculated for backpropagation. 
