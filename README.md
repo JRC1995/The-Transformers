@@ -43,5 +43,3 @@ The inital candidate output vector is initialized with ones for each data in the
 At the end of the first iteration, the predicted output is not concatenated with the initial output vector; rather, the initial unit-initalized output vector is replaced by the newly predicted output. So, there are some exceptions to the rules (as stated before) for the first iteration.  
 
 Finally all the predicted output vectors are converted into probability distributions from which predictions are made and losses are calculated for backpropagation. 
-
-(Code to be uploaded soon. )
