@@ -17,32 +17,4 @@ Note:
 
 * I am using different hyperparameters. 
 * I am using low dimensional GloVe embeddings, and less no. of layers.
-* I haven't used regularization.
 * I will not be completely training this model for now. I will not be validating or testing either. 
-
-Overall, this is more or less a 'toy' implementation.
-
-# Decoding
-
-I haven't implemented the decoding process in the exact way as it was done in original model (truthfully, I do have some confusions about the exact details of the decoder in the original model - so I just made my own adjustments). 
-
-I iterated the decoder layers for max_len no. of times when max_len is the total output sequence length. At each iteration, an output vector is predicted in the form batch_size x model_dimensions (later to be linearly transformed to express a probability distribution over the vocabularies). At the end of each iterations, the currently prediced output is concatenated with the previously predicted output vectors to get a sequence of output vectors in the shape batch_size x sequence_length x model_dimensions.
-
-This newly formed sequence of vector of shape batch_size x timestep x model_dimensions (the timestep increases every iteration) is converted to batch_size x max_len x model_dimensions (max_len = length of the output sequence) by padding with zero magnitude vectors. This is then fed to the decoder layer as input at the next iteration.  
-
-Masking was used so that the network doesn't attend to the padded word vectors beyond the current timestep position in the sequence. 
-
-The decoder layers are such that if the input is in the shape batch_size x sequence_length x model_dimensions then the output will be of the same shape. The input to the decoder is of the shape batch_size x max_len x model_dimensions, and thus the output is the same. 
-
-I reshaped the batch_size x max_len x model_dimensions shaped decoder output into batch_size x (max_len*model_dimensions) which is then linearly transformed to shape: batch_size x model_dimenions. 
-
-```
-decoderout = tf.reshape(decoderout,[batch_size,max_len*word_vec_dim])
-decoderout = tf.nn.relu(tf.matmul(decoderout,W)+B)
-```
-I actually used two feedforward layers with a relu in between for the linear transformation. 
-
-After that, the decoder output is of the size batch_size x model_dimensions.
-This is then positionally encoded, concatenated with previous predictions and fed to the network in the next timestep.
-
-In the end of all the timesteps, each of these positionally encoded output vectors are linearly transformed into probability distributions from which predictions are made and losses are calculated for backpropagation. 
