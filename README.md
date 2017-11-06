@@ -19,7 +19,7 @@ Note:
 * I am using low dimensional GloVe embeddings, and less no. of layers.
 * I will not be completely training this model for now. I will not be validating or testing either. 
 
-# Tested with:
+## Tested with:
 
 * Python 2.7.1
 * Tensorflow 1.3
