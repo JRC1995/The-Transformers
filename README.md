@@ -2,7 +2,7 @@
 
 The paper "[All you need is Attention](https://arxiv.org/abs/1706.03762)" proposes a novel approach to machine translation with the encoder decoder architecture, but solely with attention mechanisms i.e no complex layers having recurrence or convolutions.
 
-The authors of the paper describes attention as such:
+The authors of the paper describes attention as:
 
 >An attention function can be described as mapping a query and a set of key-value pairs to an output,
 >where the query, keys, values, and output are all vectors. The output is computed as a weighted sum
