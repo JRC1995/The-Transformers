@@ -153,7 +153,7 @@ train_batches_y = batches_y[0:train_len]
 import tensorflow as tf
 
 h=5
-N=4 #no. of decoder\encoder layers
+N=4 #no. of decoder and encoder layers
 learning_rate=0.002
 iters = 100
 keep_prob = tf.placeholder(tf.float32)
@@ -329,6 +329,10 @@ def decoder(y,enc_out,mask=False,pos=0):
 def model(x):
     
     encoderin = tf.nn.dropout(x,keep_prob)
+    
+    #"we apply dropout to the sums of the embeddings and the
+    # positional encodings in both the encoder and decoder stacks."
+    
     pe = tf.constant(positional_encoding(max_len,word_vec_dim)) #all position encodings
     pe = tf.reshape(pe,[max_len,1,word_vec_dim])
     
@@ -339,10 +343,9 @@ def model(x):
     
     #decoder_layers
     
-    #tf.shape(x)[0] == batch_size of x
+    #tf.shape(x)[0] == batch_size
     
-    decoderin_part1 = tf.ones([tf.shape(x)[0],1,word_vec_dim],dtype=tf.float32) 
-    #the first token of the decoder input is filled the inital <SOS> character (all ones)
+    decoderin_part1 = tf.ones([tf.shape(x)[0],1,word_vec_dim],dtype=tf.float32)
     filled = 1 #no. of output words that are filled
     
     d=512
@@ -357,8 +360,9 @@ def model(x):
         batch_output = tf.TensorArray(size=tf.shape(x)[0],dtype=tf.float32)
         
         decoderin_part2 = tf.zeros([tf.shape(x)[0],(max_len-filled),word_vec_dim],dtype=tf.float32)
-
+        
         decoderin = tf.concat([decoderin_part1,decoderin_part2],1)
+        
         decoderin = tf.nn.dropout(decoderin,keep_prob)
         
         for j in xrange(0,N):
@@ -374,21 +378,16 @@ def model(x):
    
         #Finding the word vector of the word of highest probability in the predicted distribution:
         
-        out_index = tf.cast(tf.argmax(out_prob_dist,1),tf.int32)
-        
-        for index in xrange(0,batch_size):
-            batch_output = batch_output.write(index,tf_embd_limit[out_index[index]])
-            
-        output = batch_output.stack()
-        
+        out_index = tf.cast(tf.argmax(out_prob_dist,1),tf.int32)        
+        output = tf.gather(tf_embd_limit,out_index)
+
         # Position Encoding
         output = output + pe[i]
         output = tf.reshape(output,[tf.shape(x)[0],1,word_vec_dim])
                                 
-        
         #concatenate with previous batch_outputs
         if i==0:
-            decoderin_part1 = output #the initial decoder <SOS> representive being overwritten...no need to use <SOS> to provide context. 
+            decoderin_part1 = output #right shift
             filled = 1 
             out_probs = tf.reshape(out_prob_dist,[tf.shape(x)[0],1,vocab_len])
         else:
@@ -505,4 +504,3 @@ with tf.Session() as sess: # Start Tensorflow Session
 
         step=step+1
     
-
