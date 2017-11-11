@@ -17,7 +17,7 @@ Note:
 
 * I am using different hyperparameters. 
 * I am using low dimensional GloVe embeddings, and less no. of layers.
-* I will not be completely training this model for now. I will not be validating or testing either. 
+* This implementation is untrained. I may train it, and polish the code later. 
 
 ## Tested with:
 
