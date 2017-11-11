@@ -357,13 +357,14 @@ def model(x):
     
     for i in xrange(0,max_len):
         
-        batch_output = tf.TensorArray(size=tf.shape(x)[0],dtype=tf.float32)
-        
         decoderin_part2 = tf.zeros([tf.shape(x)[0],(max_len-filled),word_vec_dim],dtype=tf.float32)
         
         decoderin = tf.concat([decoderin_part1,decoderin_part2],1)
         
         decoderin = tf.nn.dropout(decoderin,keep_prob)
+        
+        #"we apply dropout to the sums of the embeddings and the
+        # positional encodings in both the encoder and decoder stacks."
         
         for j in xrange(0,N):
             decoderin = decoder(decoderin,encoderout,mask=True,pos=filled)
