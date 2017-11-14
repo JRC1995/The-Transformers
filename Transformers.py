@@ -154,16 +154,16 @@ import tensorflow as tf
 
 h=5
 N=4 #no. of decoder and encoder layers
-learning_rate=0.002
+learning_rate=0.004
 iters = 100
-smoothing_factor = 0.2
 keep_prob = tf.placeholder(tf.float32)
 x = tf.placeholder(tf.float32, [None,None,word_vec_dim])
 y = tf.placeholder(tf.int32, [None,None])
+tf_mask = tf.placeholder(tf.float32,[None,None])
 teacher_forcing = tf.placeholder(tf.bool)
 
 
-# In[18]:
+# In[8]:
 
 
 #modified version of def LN used here: 
@@ -178,7 +178,7 @@ def layer_norm(inputs,scale,shift,epsilon = 1e-5):
     return LN
 
 
-# In[19]:
+# In[9]:
 
 
 
@@ -247,7 +247,7 @@ def multihead_attention(Q,K,V,d,weights,pos=0,mask=False):
     
 
 
-# In[20]:
+# In[10]:
 
 
 def encoder(x,weights,attention_weights,dqkv):
@@ -277,7 +277,7 @@ def encoder(x,weights,attention_weights,dqkv):
     return sublayer2
 
 
-# In[21]:
+# In[11]:
 
 
 def decoder(y,enc_out,weights,attention_weights_1,attention_weights_2,dqkv,mask=False,pos=0):
@@ -312,7 +312,7 @@ def decoder(y,enc_out,weights,attention_weights_1,attention_weights_2,dqkv,mask=
     return sublayer3
 
 
-# In[22]:
+# In[12]:
 
 
 def fn1(out_prob_dist,tf_embd):
@@ -359,13 +359,13 @@ def model(x,y,teacher_forcing=True):
     scale_enc_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
     shift_enc_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
     scale_enc_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    shift_enc_2 = tf.Variable(tf.ones([N,1,word_vec_dim]),dtype=tf.float32)
-    scale_dec_1 = tf.Variable(tf.ones([N,1,word_vec_dim]),dtype=tf.float32)
-    shift_dec_1 = tf.Variable(tf.ones([N,1,word_vec_dim]),dtype=tf.float32)
-    scale_dec_2 = tf.Variable(tf.ones([N,1,word_vec_dim]),dtype=tf.float32)
-    shift_dec_2 = tf.Variable(tf.ones([N,1,word_vec_dim]),dtype=tf.float32)
-    scale_dec_3 = tf.Variable(tf.ones([N,1,word_vec_dim]),dtype=tf.float32)
-    shift_dec_3 = tf.Variable(tf.ones([N,1,word_vec_dim]),dtype=tf.float32)
+    shift_enc_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+    scale_dec_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+    shift_dec_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+    scale_dec_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+    shift_dec_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+    scale_dec_3 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+    shift_dec_3 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
     
     #Parameters for the linear layers converting decoder output to probability distibutions.   
     d=1024
@@ -516,14 +516,17 @@ def model(x,y,teacher_forcing=True):
     return out_probs          
 
 
-# In[23]:
+# In[13]:
 
 
 output = model(x,y,teacher_forcing)
 
 #OPTIMIZER
 
-cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=output, labels=y))
+cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=output, labels=y)
+cost = tf.multiply(cost,tf_mask) #mask used to remove loss effect due to PADS
+cost = tf.reduce_mean(cost)
+
 optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate,beta1=0.9,beta2=0.98,epsilon=1e-9).minimize(cost)
 
 #wanna add some temperature?
@@ -537,7 +540,7 @@ softmax_output = tf.nn.softmax(scaled_output)"""
 softmax_output = tf.nn.softmax(output)
 
 
-# In[24]:
+# In[14]:
 
 
 def transform_out(output_batch):
@@ -549,6 +552,15 @@ def transform_out(output_batch):
             transformed_output[i] = vocab_limit.index(vec2word(output_text[i]))
         out.append(transformed_output)
     return np.asarray(out,np.int32)
+
+def create_Mask(output_batch):
+    pad_index = vocab_limit.index('<PAD>')
+    mask = np.ones_like((output_batch),np.float32)
+    for i in xrange(len(mask)):
+        for j in xrange(len(mask[i])):
+            if output_batch[i,j]==pad_index:
+                mask[i,j]=0
+    return mask
 
 
 # In[ ]:
@@ -578,7 +590,8 @@ with tf.Session() as sess: # Start Tensorflow Session
             print("\nCHOSEN SAMPLE NO.: "+str(sample_no))
             
             train_out = transform_out(train_batches_y[i])
-            
+            mask = create_Mask(train_out)
+
             if i%display_step==0:
                 print("\nEpoch: "+str(step+1)+" Iteration: "+str(i+1))
                 print("\nSAMPLE TEXT:")
@@ -596,6 +609,7 @@ with tf.Session() as sess: # Start Tensorflow Session
             _,loss,out = sess.run([optimizer,cost,softmax_output],feed_dict={x: train_batches_x_pe[i], 
                                                                              y: train_out,
                                                                              keep_prob: 0.9,
+                                                                             tf_mask: mask,
                                                                              teacher_forcing: random_bool})
             
             if i%display_step==0:
