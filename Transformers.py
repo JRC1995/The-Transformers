@@ -124,17 +124,6 @@ np_embd_limit = np.asarray(embd_limit,dtype=np.float32)
 # In[5]:
 
 
-def positional_encoding(seq_len,model_dimensions):
-    pe = np.zeros((seq_len,model_dimensions,),np.float32)
-    for pos in xrange(0,seq_len):
-        for i in xrange(0,model_dimensions):
-            pe[pos][i] = math.sin(pos/(10000**(2*i/model_dimensions)))
-    return pe.reshape((seq_len,model_dimensions))
-
-
-# In[6]:
-
-
 #Prepare training data
 
 train_len = int(0.75*len(batches_x))
@@ -147,42 +136,141 @@ train_batches_y = batches_y[0:train_len]
 # (Rest of the data can be used for validating and testing)
 
 
-# In[7]:
+# In[6]:
 
 
 import tensorflow as tf
 
-h=5
-N=4 #no. of decoder and encoder layers
-learning_rate=0.004
-iters = 100
+#Hyperparamters
+
+h=8 #no. of heads
+N=1 #no. of decoder and encoder layers
+learning_rate=0.001
+epochs = 200
 keep_prob = tf.placeholder(tf.float32)
+
+#Placeholders
+
 x = tf.placeholder(tf.float32, [None,None,word_vec_dim])
 y = tf.placeholder(tf.int32, [None,None])
-tf_mask = tf.placeholder(tf.float32,[None,None])
+
+output_len = tf.placeholder(tf.int32)
+
 teacher_forcing = tf.placeholder(tf.bool)
+
+tf_pad_mask = tf.placeholder(tf.float32,[None,None])
+tf_illegal_position_masks = tf.placeholder(tf.float32,[None,None,None])
+
+tf_pe_out = tf.placeholder(tf.float32,[None,None,None]) #positional codes for output
+
+
+# In[7]:
+
+
+
+# Dimensions for Q (Query),K (Keys) and V (Values) for attention layers.
+
+dqkv = 32 
+ 
+#Parameters for attention sub-layers for all n encoders
+
+Wq_enc = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wk_enc = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wv_enc = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wo_enc = tf.Variable(tf.truncated_normal(shape=[N,h*dqkv,word_vec_dim],stddev=0.01))
+
+#Parameters for position-wise fully connected layers for n encoders
+
+d = 1024
+W1_enc = tf.Variable(tf.truncated_normal(shape=[N,1,1,word_vec_dim,d],stddev=0.01))
+b1_enc = tf.Variable(tf.constant(0,tf.float32,shape=[N,d]))
+W2_enc = tf.Variable(tf.truncated_normal(shape=[N,1,1,d,word_vec_dim],stddev=0.01))
+b2_enc = tf.Variable(tf.constant(0,tf.float32,shape=[N,word_vec_dim]))
+ 
+#Parameters for 2 attention sub-layers for all n decoders
+
+Wq_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wk_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wv_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wo_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h*dqkv,word_vec_dim],stddev=0.01))
+Wq_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wk_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wv_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
+Wo_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h*dqkv,word_vec_dim],stddev=0.01))
+ 
+#Parameters for position-wise fully connected layers for n decoders
+
+d = 1024
+W1_dec = tf.Variable(tf.truncated_normal(shape=[N,1,1,word_vec_dim,d],stddev=0.01))
+b1_dec = tf.Variable(tf.constant(0,tf.float32,shape=[N,d]))
+W2_dec = tf.Variable(tf.truncated_normal(shape=[N,1,1,d,word_vec_dim],stddev=0.01))
+b2_dec = tf.Variable(tf.constant(0,tf.float32,shape=[N,word_vec_dim]))
+ 
+#Layer Normalization parameters for encoder and decoder   
+
+scale_enc_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+shift_enc_1 = tf.Variable(tf.zeros([N,1,1,word_vec_dim]),dtype=tf.float32)
+
+scale_enc_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+shift_enc_2 = tf.Variable(tf.zeros([N,1,1,word_vec_dim]),dtype=tf.float32)
+
+#Layer Normalization parameters for decoder   
+
+scale_dec_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+shift_dec_1 = tf.Variable(tf.zeros([N,1,1,word_vec_dim]),dtype=tf.float32)
+
+scale_dec_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+shift_dec_2 = tf.Variable(tf.zeros([N,1,1,word_vec_dim]),dtype=tf.float32)
+
+scale_dec_3 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
+shift_dec_3 = tf.Variable(tf.zeros([N,1,1,word_vec_dim]),dtype=tf.float32)
 
 
 # In[8]:
 
 
-#modified version of def LN used here: 
-#https://theneuralperspective.com/2016/10/27/gradient-topics/
-
-def layer_norm(inputs,scale,shift,epsilon = 1e-5):
-
-    mean, var = tf.nn.moments(inputs, [1,2], keep_dims=True)
-
-    LN = scale * (inputs - mean) / tf.sqrt(var + epsilon) + shift
- 
-    return LN
+def positional_encoding(seq_len,model_dimensions):
+    pe = np.zeros((seq_len,model_dimensions,),np.float32)
+    for pos in xrange(0,seq_len):
+        for i in xrange(0,model_dimensions):
+            pe[pos][i] = math.sin(pos/(10000**(2*i/model_dimensions)))
+    return pe.reshape((seq_len,model_dimensions))
 
 
 # In[9]:
 
 
 
-def attention(Q,K,V,d,pos=0,mask=False):
+def layer_norm(inputs,scale,shift,epsilon = 1e-9):
+
+    mean, var = tf.nn.moments(inputs, [1,2], keep_dims=True)
+
+    LN = tf.multiply((scale / tf.sqrt(var + epsilon)),(inputs - mean)) + shift
+ 
+    return LN
+
+
+# In[10]:
+
+
+def generate_masks_for_illegal_positions(out_len):
+    
+    masks=np.zeros((out_len-1,out_len,out_len),dtype=np.float32)
+    
+    for i in xrange(1,out_len):
+        mask = np.zeros((out_len,out_len),dtype=np.float32)
+        mask[i:out_len,:] = -2**30
+        mask[:,i:out_len] = -2**30
+        masks[i-1] = mask
+        
+    return masks
+
+
+# In[11]:
+
+
+
+def attention(Q,K,V,d,filled=0,mask=False):
 
     K = tf.transpose(K,[0,2,1])
     d = tf.cast(d,tf.float32)
@@ -190,21 +278,14 @@ def attention(Q,K,V,d,pos=0,mask=False):
     softmax_component = tf.div(tf.matmul(Q,K),tf.sqrt(d))
     
     if mask == True:
-        mask = np.zeros((max_len,max_len),dtype=np.float32)
-        mask[pos:max_len,:] = -2**30
-        mask[:,pos:max_len] = -2**30
-        mask = tf.convert_to_tensor(mask)
-        mask = tf.reshape(mask,[1,max_len,max_len])
+        softmax_component = softmax_component + tf_illegal_position_masks[filled-1]
         
-        softmax_component = softmax_component + mask
-        
-
     result = tf.matmul(tf.nn.dropout(tf.nn.softmax(softmax_component),keep_prob),V)
  
     return result
        
 
-def multihead_attention(Q,K,V,d,weights,pos=0,mask=False):
+def multihead_attention(Q,K,V,d,weights,filled=0,mask=False):
     
     Q_ = tf.reshape(Q,[-1,tf.shape(Q)[2]])
     K_ = tf.reshape(K,[-1,tf.shape(Q)[2]])
@@ -228,7 +309,7 @@ def multihead_attention(Q,K,V,d,weights,pos=0,mask=False):
         V_w = tf.matmul(V_,Wv[i])
         V_w = tf.reshape(V_w,[tf.shape(V)[0],tf.shape(V)[1],d])
 
-        head = attention(Q_w,K_w,V_w,d,pos,mask)
+        head = attention(Q_w,K_w,V_w,d,filled,mask)
             
         heads = heads.write(i,head)
         
@@ -247,7 +328,7 @@ def multihead_attention(Q,K,V,d,weights,pos=0,mask=False):
     
 
 
-# In[10]:
+# In[12]:
 
 
 def encoder(x,weights,attention_weights,dqkv):
@@ -262,25 +343,35 @@ def encoder(x,weights,attention_weights,dqkv):
     scale2 = weights['scale2']
     shift2 = weights['shift2']
     
+    # SUBLAYER 1 (MASKED MULTI HEADED SELF ATTENTION)
     
     sublayer1 = multihead_attention(x,x,x,dqkv,attention_weights)
     sublayer1 = tf.nn.dropout(sublayer1,keep_prob)
     sublayer1 = layer_norm(sublayer1 + x,scale1,shift1)
     
-    sublayer1_ = tf.reshape(sublayer1,[-1,word_vec_dim])
+    sublayer1_ = tf.reshape(sublayer1,[tf.shape(sublayer1)[0],1,tf.shape(sublayer1)[1],word_vec_dim])
     
-    sublayer2 = tf.matmul(tf.nn.relu(tf.matmul(sublayer1_,W1)+b1),W2) + b2
-    sublayer2 = tf.reshape(sublayer2,tf.shape(x))
+    # SUBLAYER 2 (TWO 1x1 CONVOLUTIONAL LAYERS AKA POSITION WISE FULLY CONNECTED NETWORKS)
+    
+    sublayer2 = tf.nn.conv2d(sublayer1_, W1, strides=[1,1,1,1], padding='SAME')
+    sublayer2 = tf.nn.bias_add(sublayer2,b1)
+    sublayer2 = tf.nn.relu(sublayer2)
+    
+    sublayer2 = tf.nn.conv2d(sublayer2, W2, strides=[1,1,1,1], padding='SAME')
+    sublayer2 = tf.nn.bias_add(sublayer2,b2)
+    
+    sublayer2 = tf.reshape(sublayer2,[tf.shape(sublayer2)[0],tf.shape(sublayer2)[2],word_vec_dim])
+    
     sublayer2 = tf.nn.dropout(sublayer2,keep_prob)
     sublayer2 = layer_norm(sublayer2 + sublayer1,scale2,shift2)
     
     return sublayer2
 
 
-# In[11]:
+# In[13]:
 
 
-def decoder(y,enc_out,weights,attention_weights_1,attention_weights_2,dqkv,mask=False,pos=0):
+def decoder(y,enc_out,weights,masked_attention_weights,attention_weights,dqkv,mask=False,filled=0):
 
     W1 = weights['W1']
     W2 = weights['W2']
@@ -293,98 +384,44 @@ def decoder(y,enc_out,weights,attention_weights_1,attention_weights_2,dqkv,mask=
     shift2 = weights['shift2']
     scale3 = weights['scale3']
     shift3 = weights['shift3']
+    
+    # SUBLAYER 1 (MASKED MULTI HEADED SELF ATTENTION)
 
-    sublayer1 = multihead_attention(y,y,y,dqkv,attention_weights_1,pos,mask)
+    sublayer1 = multihead_attention(y,y,y,dqkv,masked_attention_weights,filled,mask)
     sublayer1 = tf.nn.dropout(sublayer1,keep_prob)
     sublayer1 = layer_norm(sublayer1 + y,scale1,shift1)
     
-    sublayer2 = multihead_attention(sublayer1,enc_out,enc_out,dqkv,attention_weights_2)
+    # SUBLAYER 2 (MULTIHEADED ENCODER-DECODER INTERLAYER ATTENTION)
+    
+    sublayer2 = multihead_attention(sublayer1,enc_out,enc_out,dqkv,attention_weights)
     sublayer2 = tf.nn.dropout(sublayer2,keep_prob)
     sublayer2 = layer_norm(sublayer2 + sublayer1,scale2,shift2)
     
-    sublayer2_ = tf.reshape(sublayer2,[-1,word_vec_dim])
+    # SUBLAYER 3 (TWO 1x1 CONVOLUTIONAL LAYERS AKA POSITION WISE FULLY CONNECTED NETWORKS)
     
-    sublayer3 = tf.matmul(tf.nn.relu(tf.matmul(sublayer2_,W1)+b1),W2) + b2
-    sublayer3 = tf.reshape(sublayer3,tf.shape(y))
+    sublayer2_ = tf.reshape(sublayer2,[tf.shape(sublayer2)[0],1,tf.shape(sublayer2)[1],word_vec_dim])
+    
+    sublayer3 = tf.nn.conv2d(sublayer2_, W1, strides=[1,1,1,1], padding='SAME')
+    sublayer3 = tf.nn.bias_add(sublayer3,b1)
+    sublayer3 = tf.nn.relu(sublayer3)
+    
+    sublayer3 = tf.nn.conv2d(sublayer3, W2, strides=[1,1,1,1], padding='SAME')
+    sublayer3 = tf.nn.bias_add(sublayer3,b2)
+    
+    sublayer3 = tf.reshape(sublayer3,[tf.shape(sublayer3)[0],tf.shape(sublayer3)[2],word_vec_dim])
+    
     sublayer3 = tf.nn.dropout(sublayer3,keep_prob)
     sublayer3 = layer_norm(sublayer3 + sublayer2,scale3,shift3)
     
     return sublayer3
 
 
-# In[12]:
+# In[14]:
 
 
-def fn1(out_prob_dist,tf_embd):
-    out_index = tf.cast(tf.argmax(out_prob_dist,1),tf.int32)
-    return tf.gather(tf_embd,out_index)
-
-
-def model(x,y,teacher_forcing=True):
+def stacked_encoders(layer_num,encoderin):
     
-    #dimensions for Q,K and V for attention layers. 
-    dqkv = 30
-    
-    #Parameters for attention sub-layers for all n encoders
-    Wq_enc = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wk_enc = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wv_enc = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wo_enc = tf.Variable(tf.truncated_normal(shape=[N,h*dqkv,word_vec_dim],stddev=0.01))
-    
-    #Parameters for fully connected layers for n encoders
-    d = 1024
-    W1_enc = tf.Variable(tf.truncated_normal(shape=[N,word_vec_dim,d],stddev=0.01))
-    b1_enc = tf.Variable(tf.truncated_normal(shape=[N,1,d],stddev=0.01))
-    W2_enc = tf.Variable(tf.truncated_normal(shape=[N,d,word_vec_dim],stddev=0.01))
-    b2_enc = tf.Variable(tf.truncated_normal(shape=[N,1,word_vec_dim],stddev=0.01))
-    
-    #Parameters for 2 attention sub-layers for all n decoders
-    Wq_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wk_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wv_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wo_dec_1 = tf.Variable(tf.truncated_normal(shape=[N,h*dqkv,word_vec_dim],stddev=0.01))
-    Wq_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wk_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wv_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h,word_vec_dim,dqkv],stddev=0.01))
-    Wo_dec_2 = tf.Variable(tf.truncated_normal(shape=[N,h*dqkv,word_vec_dim],stddev=0.01))
-    
-    #Parameters for fully connected layers for n decoders
-    d = 1024
-    W1_dec = tf.Variable(tf.truncated_normal(shape=[N,word_vec_dim,d],stddev=0.01))
-    b1_dec = tf.Variable(tf.truncated_normal(shape=[N,1,d],stddev=0.01))
-    W2_dec = tf.Variable(tf.truncated_normal(shape=[N,d,word_vec_dim],stddev=0.01))
-    b2_dec = tf.Variable(tf.truncated_normal(shape=[N,1,word_vec_dim],stddev=0.01))
-    
-    #Layer Normalization parameters for encoder and decoder   
-    scale_enc_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    shift_enc_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    scale_enc_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    shift_enc_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    scale_dec_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    shift_dec_1 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    scale_dec_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    shift_dec_2 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    scale_dec_3 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    shift_dec_3 = tf.Variable(tf.ones([N,1,1,word_vec_dim]),dtype=tf.float32)
-    
-    #Parameters for the linear layers converting decoder output to probability distibutions.   
-    d=1024
-    Wpd1 = tf.Variable(tf.truncated_normal(shape=[max_len*word_vec_dim,d],stddev=0.01))
-    bpd1 = tf.Variable(tf.truncated_normal(shape=[1,d],stddev=0.01))
-    Wpd2 = tf.Variable(tf.truncated_normal(shape=[d,vocab_len],stddev=0.01))
-    bpd2 = tf.Variable(tf.truncated_normal(shape=[1,vocab_len],stddev=0.01))
-    
-    
-    encoderin = x #should be already positionally encoded 
-    encoderin = tf.nn.dropout(encdoerin,keep_prob)
-    
-    #all position encodings for outputs
-    pe_out = tf.constant(positional_encoding(max_len,word_vec_dim)) 
-    pe_out = tf.reshape(pe_out,[max_len,1,word_vec_dim])
-    
-    #encoder layers
-    
-    for i in xrange(0,N):
+    for i in xrange(0,layer_num):
         
         encoder_weights = {
             
@@ -407,125 +444,182 @@ def model(x,y,teacher_forcing=True):
         }
         
         encoderin = encoder(encoderin,encoder_weights,attention_weights,dqkv)
+    
+    return encoderin
+    
+
+
+# In[15]:
+
+
+def stacked_decoders(layer_num,decoderin,encoderout,filled):
+    
+    for j in xrange(0,layer_num):
         
-    encoderout = encoderin
+        decoder_weights = {
+            
+            'W1': W1_dec[j],
+            'W2': W2_dec[j],
+            'b1': b1_dec[j],
+            'b2': b2_dec[j],
+            'scale1': scale_dec_1[j],
+            'shift1': shift_dec_1[j],
+            'scale2': scale_dec_2[j],
+            'shift2': shift_dec_2[j],
+            'scale3': scale_dec_3[j],
+            'shift3': shift_dec_3[j],
+        }
+            
+        masked_attention_weights = {
+            
+            'Wq': Wq_dec_1[j],
+            'Wk': Wk_dec_1[j],
+            'Wv': Wv_dec_1[j],
+            'Wo': Wo_dec_1[j],                       
+        }
+        
+        attention_weights = {
+            
+            'Wq': Wq_dec_2[j],
+            'Wk': Wk_dec_2[j],
+            'Wv': Wv_dec_2[j],
+            'Wo': Wo_dec_2[j],                       
+        }
+            
+        decoderin = decoder(decoderin,encoderout,
+                            decoder_weights,
+                            masked_attention_weights,
+                            attention_weights,
+                            dqkv,
+                            mask=True,filled=filled)
+    return decoderin
     
-    #decoder_layers
+
+
+# In[16]:
+
+
+def predicted_embedding(out_prob_dist,tf_embd):
+    out_index = tf.cast(tf.argmax(out_prob_dist,1),tf.int32)
+    return tf.gather(tf_embd,out_index)
+
+def replaceSOS(output,out_prob_dist):
+    return output,tf.constant(1),tf.reshape(out_prob_dist,[tf.shape(x)[0],1,vocab_len])
+
+def add_pred_to_output_list(decoderin_part_1,output,filled,out_probs,out_prob_dist):
+    decoderin_part_1 = tf.concat([decoderin_part_1,output],1)
+    filled += 1
+    out_probs = tf.concat([out_probs,tf.reshape(out_prob_dist,[tf.shape(x)[0],1,vocab_len])],1)
+    return decoderin_part_1,filled,out_probs
+
+
+
+# In[17]:
+
+
+def model(x,teacher_forcing=True):
     
-    batch_size = tf.shape(x)[0]
+        
+    # NOTE: tf.shape(x)[0] == batch_size
     
-    decoderin_part1 = tf.ones([batch_size,1,word_vec_dim],dtype=tf.float32)
-    filled = 1 #no. of output words that are filled
+    encoderin = x # (should be already positionally encoded) 
+    encoderin = tf.nn.dropout(encoderin,keep_prob)
+
+    
+    # ENCODER LAYERS
+
+    encoderout = stacked_encoders(N,encoderin)
+    
+
+    # DECODER LAYERS
+
+    decoderin_part_1 = tf.ones([tf.shape(x)[0],1,word_vec_dim],dtype=tf.float32) #represents SOS
+    
+    filled = tf.constant(1) 
+    # no. of output words that are filled
+    # filled value is used to retrieve appropriate mask for illegal positions. 
+    
     
     tf_embd = tf.convert_to_tensor(np_embd_limit)
+    Wpd = tf.transpose(tf_embd)
+    # Wpd the transpose of the output embedding matrix will be used to convert the decoder output
+    # into a probability distribution over the output language vocabulary. 
     
+    out_probs = tf.zeros([tf.shape(x)[0],output_len,vocab_len],tf.float32)
+    # out_probs will contain the list of probability distributions.
+
     #tf_while_loop since output_len will be dynamically defined during session run
     
-    for i in xrange(max_len):
-        decoderin_part2 = tf.zeros([batch_size,(max_len-filled),word_vec_dim],dtype=tf.float32)
-        decoderin = tf.concat([decoderin_part1,decoderin_part2],1)
- 
+    i=tf.constant(0)
+    
+    def cond(i,filled,decoderin_part_1,out_probs):
+        return i<output_len
+    
+    def body(i,filled,decoderin_part_1,out_probs):
+        
+        decoderin_part_2 = tf.zeros([tf.shape(x)[0],(output_len-filled),word_vec_dim],dtype=tf.float32)
+        
+        decoderin = tf.concat([decoderin_part_1,decoderin_part_2],1)
+        
         decoderin = tf.nn.dropout(decoderin,keep_prob)
         
-        for j in xrange(0,N):
-            
-            decoder_weights = {
-                
-                'W1': W1_dec[j],
-                'W2': W2_dec[j],
-                'b1': b1_dec[j],
-                'b2': b2_dec[j],
-                'scale1': scale_dec_1[j],
-                'shift1': shift_dec_1[j],
-                'scale2': scale_dec_2[j],
-                'shift2': shift_dec_2[j],
-                'scale3': scale_dec_3[j],
-                'shift3': shift_dec_3[j],
-            }
-            
-            attention_weights_1 = {
-                
-                'Wq': Wq_dec_1[j],
-                'Wk': Wk_dec_1[j],
-                'Wv': Wv_dec_1[j],
-                'Wo': Wo_dec_1[j],                       
-             }
-            
-            attention_weights_2 = {
-                
-                'Wq': Wq_dec_2[j],
-                'Wk': Wk_dec_2[j],
-                'Wv': Wv_dec_2[j],
-                'Wo': Wo_dec_2[j],                       
-             }
-            
-            decoderin = decoder(decoderin,encoderout,
-                                decoder_weights,
-                                attention_weights_1,
-                                attention_weights_2,
-                                dqkv,
-                                mask=True,pos=filled)
-            
-        decoderout = decoderin
-        #decoderout shape = batch_size x seq_len x word_vec_dim
+        decoderout = stacked_decoders(N,decoderin,encoderout,filled)
         
-        #converting to probability distributions
-        decoderout = tf.reshape(decoderout,[batch_size,max_len*word_vec_dim])
-        # A two fully connected feed forward layer for transforming dimensions
-        # (onverting to probability distributions)
+        # decoderout shape (now) = batch_size x seq_len x word_vec_dim
+
+        decoderout = tf.reduce_sum(decoderout,1) 
+        # A weighted summation of the attended decoder input
+        # decoderout shape (now) = batch_size x word_vec_dim
         
-        out_prob_dist = tf.nn.relu(tf.matmul(decoderout,Wpd1)+bpd1)
-        out_prob_dist = tf.matmul(out_prob_dist,Wpd2)+bpd2
+        # converting decoderout to probability distributions
         
-        """
-        #Label smoothing
-        #(https://stats.stackexchange.com/questions/218656/classification-with-noisy-labels)
-        out_prob_dist = (1-smoothing_factor)*out_prob_dist + (smoothing_factor/vocab_len)
-        """
-        
-        out_prob_dist = tf.reshape(out_prob_dist,[batch_size,vocab_len])
+        out_prob_dist = tf.matmul(decoderout,Wpd)
    
-        # if teacher forcing is false, initiate fn1(). It guesses the output embeddings
-        # to be those whose vocabulary index has maximum probability in out_prob_dist
+        # If teacher forcing is false, initiate predicted_embedding(). It guesses the output embeddings
+        # to be that whose vocabulary index has maximum probability in out_prob_dist
         # (the current output probability distribution). The embedding is used in the next
         # iteration. 
         
-        # if teacher forcing is true, use the embedding of target index from y for the next 
-        # iteration.
+        # If teacher forcing is true, use the embedding of target index from y (laebls) 
+        # for the next iteration.
         
         output = tf.cond(tf.equal(teacher_forcing,tf.convert_to_tensor(False)),
-                         lambda: fn1(out_prob_dist,tf_embd),
+                         lambda: predicted_embedding(out_prob_dist,tf_embd),
                          lambda: tf.gather(tf_embd,y[:,i]))
-
         
         # Position Encoding the output
-        output = output + pe_out[i]
-        output = tf.reshape(output,[batch_size,1,word_vec_dim])
+        
+        output = output + tf_pe_out[i]
+        output = tf.reshape(output,[tf.shape(x)[0],1,word_vec_dim])
                                 
         
-        # concatenate with previous batch_outputs
-        if i==0:
-            decoderin_part1 = output
-            filled = 1 
-            out_probs = tf.reshape(out_prob_dist,[tf.shape(x)[0],1,vocab_len])
-        else:
-            decoderin_part1 = tf.concat([decoderin_part1,output],1)
-            filled += 1
-            out_probs = tf.concat([out_probs,tf.reshape(out_prob_dist,[tf.shape(x)[0],1,vocab_len])],1)
+        #concatenate with list of previous predicted output tokens
+        
+        decoderin_part_1,filled,out_probs = tf.cond(tf.equal(i,0),
+                                        lambda:replaceSOS(output,out_prob_dist),
+                                        lambda:add_pred_to_output_list(decoderin_part_1,output,filled,out_probs,out_prob_dist))
+        
+        return i+1,filled,decoderin_part_1,out_probs
+            
+    _,_,_,out_probs = tf.while_loop(cond,body,[i,filled,decoderin_part_1,out_probs],
+                      shape_invariants=[i.get_shape(),
+                                        filled.get_shape(),
+                                        tf.TensorShape([None,None,word_vec_dim]),
+                                        tf.TensorShape([None,None,vocab_len])])
 
-    
     return out_probs          
 
 
-# In[13]:
+# In[18]:
 
 
-output = model(x,y,teacher_forcing)
+# Construct Model
+output = model(x,teacher_forcing)
 
 #OPTIMIZER
 
 cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=output, labels=y)
-cost = tf.multiply(cost,tf_mask) #mask used to remove loss effect due to PADS
+cost = tf.multiply(cost,tf_pad_mask) #mask used to remove loss effect due to PADS
 cost = tf.reduce_mean(cost)
 
 optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate,beta1=0.9,beta2=0.98,epsilon=1e-9).minimize(cost)
@@ -541,7 +635,7 @@ softmax_output = tf.nn.softmax(scaled_output)"""
 softmax_output = tf.nn.softmax(output)
 
 
-# In[14]:
+# In[19]:
 
 
 def transform_out(output_batch):
@@ -554,7 +648,7 @@ def transform_out(output_batch):
         out.append(transformed_output)
     return np.asarray(out,np.int32)
 
-def create_Mask(output_batch):
+def create_pad_Mask(output_batch):
     pad_index = vocab_limit.index('<PAD>')
     mask = np.ones_like((output_batch),np.float32)
     for i in xrange(len(mask)):
@@ -582,7 +676,7 @@ with tf.Session() as sess: # Start Tensorflow Session
     best_loss = 999
     display_step = 1
     
-    while step < iters:
+    while step < epochs:
            
         batch_len = len(train_batches_x_pe)
         for i in xrange(0,batch_len):
@@ -591,7 +685,6 @@ with tf.Session() as sess: # Start Tensorflow Session
             print("\nCHOSEN SAMPLE NO.: "+str(sample_no))
             
             train_out = transform_out(train_batches_y[i])
-            mask = create_Mask(train_out)
 
             if i%display_step==0:
                 print("\nEpoch: "+str(step+1)+" Iteration: "+str(i+1))
@@ -600,17 +693,29 @@ with tf.Session() as sess: # Start Tensorflow Session
                     print(str(vec2word(vec)),end=" ")
                 print("\n")
                 
-            rand = random.randint(0,2) #determines chance of using Teacher Forcing
-            if rand==1:
-                random_bool = True
-            else:
+            rand = random.randint(0,4) #determines chance of using Teacher Forcing
+            if rand==2:
                 random_bool = False
+            else:
+                random_bool = True
+                
+            output_seq_len = len(train_out[0])
+            
+            illegal_position_masks = generate_masks_for_illegal_positions(output_seq_len)
+            
+            pe_out = positional_encoding(output_seq_len,word_vec_dim)
+            pe_out = pe_out.reshape((output_seq_len,1,word_vec_dim))
+            
+            pad_mask = create_pad_Mask(train_out)
 
             # Run optimization operation (backpropagation)
             _,loss,out = sess.run([optimizer,cost,softmax_output],feed_dict={x: train_batches_x_pe[i], 
                                                                              y: train_out,
                                                                              keep_prob: 0.9,
-                                                                             tf_mask: mask,
+                                                                             output_len: output_seq_len,
+                                                                             tf_illegal_position_masks: illegal_position_masks,
+                                                                             tf_pe_out: pe_out,
+                                                                             tf_pad_mask: pad_mask,
                                                                              teacher_forcing: random_bool})
             
             if i%display_step==0:
@@ -618,11 +723,11 @@ with tf.Session() as sess: # Start Tensorflow Session
                 flag = 0
                 for array in out[sample_no]:
                     
-                    prediction_int = np.random.choice(range(vocab_len), p=array.ravel()) 
+                    #prediction_int = np.random.choice(range(vocab_len), p=array.ravel()) 
                     #(^use this if you want some variety)
                     #(or use this what's below:)
                     
-                    #prediction_int = np.argmax(array)
+                    prediction_int = np.argmax(array)
                     
                     if vocab_limit[prediction_int] in string.punctuation or flag==0: 
                         print(str(vocab_limit[prediction_int]),end='')
