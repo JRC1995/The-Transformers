@@ -8,7 +8,7 @@ import numpy as np
 import math
 from __future__ import division
 
-filename = 'glove.6B.50d.txt' 
+filename = 'glove.6B.300d.txt' 
 # (glove data set from: https://nlp.stanford.edu/projects/glove/)
 
 #filename = 'numberbatch-en.txt'
@@ -31,32 +31,19 @@ vocab,embd = loadembeddings(filename)
 
 word_vec_dim = len(embd[0]) # word_vec_dim = dimension of each word vectors
 
-e = np.zeros((word_vec_dim,),np.float32)+0.0001
+#e = np.zeros((word_vec_dim,),np.float32)+0.0001
 
 vocab.append('<UNK>') #<UNK> represents unknown word
-embdunk = np.asarray(embd[vocab.index('unk')],np.float32)+e
+embdunk = np.random.randn(word_vec_dim) #np.asarray(embd[vocab.index('unk')],np.float32)+e
     
 vocab.append('<EOS>') #<EOS> represents end of sentence
-embdeos = np.asarray(embd[vocab.index('eos')],np.float32)+e
+embdeos = np.random.randn(word_vec_dim) #np.asarray(embd[vocab.index('eos')],np.float32)+e
 
 vocab.append('<PAD>') #<PAD> represents paddings
 
-flag1=0
-flag2=0
 
-for vec in embd:
-    
-    if np.all(np.equal(np.asarray(vec,np.float32),embdunk)):
-        flag1=1
-        print "FLAG1"   
-    if np.all(np.equal(np.asarray(vec,np.float32),embdeos)):
-        flag2=1
-        print "FLAG2"
-
-if flag1==0:
-    embd.append(embdunk)  
-if flag2 == 0:
-    embd.append(embdeos)  
+embd.append(embdunk)  
+embd.append(embdeos)  
     
 embdpad = np.zeros(word_vec_dim)
 embd.append(embdpad)
@@ -66,6 +53,38 @@ embedding = embedding.astype(np.float32)
 
 
 # In[2]:
+
+
+import pickle
+
+
+with open ('AmazonPICKLE', 'rb') as fp:
+    PICK = pickle.load(fp)
+
+vocab_limit = PICK[0]
+vocab_len = len(vocab_limit)
+
+embd = PICK[1]
+
+batch_size = int(PICK[2])
+
+train_batches_x = PICK[3]
+train_batches_y = PICK[4]
+
+val_batches_x = PICK[5]
+val_batches_y = PICK[6]
+
+#print(len(val_batches_x))
+
+test_batches_x = PICK[7]
+test_batches_y = PICK[8]
+
+max_len = len(train_batches_y[0][0]) #max output len
+#print(max_len)
+    
+
+
+# In[3]:
 
 
 def word2vec(word):  # converts a given word into its vector representation
@@ -87,53 +106,18 @@ def vec2word(vec):   # converts a given vector representation into the represent
     
 
 
-# In[3]:
-
-
-import pickle
-
-
-with open ('AmazonPICKLE', 'rb') as fp:
-    PICK = pickle.load(fp)
-
-vocab_limit = PICK[0]
-vocab_len = len(vocab_limit)
-
-batch_size = int(PICK[1])
-
-batches_x = PICK[2]
-batches_y = PICK[3]
-
-batches_x_pe = PICK[4] #already position encoded
-
-max_len = len(batches_y[0][0]) #max output len
-    
-
-
 # In[4]:
 
 
-embd_limit = []
-
-for i in xrange(0,vocab_len):
-    embd_limit.append(word2vec(vocab_limit[i]))
-
-np_embd_limit = np.asarray(embd_limit,dtype=np.float32)
+vocab_dict = {word:idx for idx,word in enumerate(vocab)}
+vec2vocab = {idx:word for word,idx in vocab_dict.items()}
 
 
 # In[5]:
 
 
-#Prepare training data
 
-train_len = int(0.75*len(batches_x))
-
-train_batches_x= batches_x[0:train_len]
-train_batches_x_pe = batches_x_pe[0:train_len]
-
-train_batches_y = batches_y[0:train_len]
-
-# (Rest of the data can be used for validating and testing)
+np_embd_limit = np.asarray(embd,dtype=np.float32)
 
 
 # In[6]:
@@ -151,7 +135,7 @@ keep_prob = tf.placeholder(tf.float32)
 
 #Placeholders
 
-x = tf.placeholder(tf.float32, [None,None,word_vec_dim])
+x = tf.placeholder(tf.int32, [None,None])
 y = tf.placeholder(tf.int32, [None,None])
 
 output_len = tf.placeholder(tf.int32)
@@ -161,7 +145,7 @@ teacher_forcing = tf.placeholder(tf.bool)
 tf_pad_mask = tf.placeholder(tf.float32,[None,None])
 tf_illegal_position_masks = tf.placeholder(tf.float32,[None,None,None])
 
-tf_pe_out = tf.placeholder(tf.float32,[None,None,None]) #positional codes for output
+#tf_pe_out = tf.placeholder(tf.float32,[None,None,None]) #positional codes for output
 
 
 # In[7]:
@@ -229,12 +213,15 @@ shift_dec_3 = tf.Variable(tf.zeros([N,1,1,word_vec_dim]),dtype=tf.float32)
 # In[8]:
 
 
-def positional_encoding(seq_len,model_dimensions):
+def positional_encoding(seq_len,model_dimensions=50):
     pe = np.zeros((seq_len,model_dimensions,),np.float32)
-    for pos in xrange(0,seq_len):
-        for i in xrange(0,model_dimensions):
-            pe[pos][i] = math.sin(pos/(10000**(2*i/model_dimensions)))
-    return pe.reshape((seq_len,model_dimensions))
+    for pos in range(0,seq_len):
+        for i in range(0,model_dimensions):
+            if i%2==0:
+                pe[pos][i] = math.sin(pos/(10000**(2*i/model_dimensions)))
+            elif i%(2+1)==0:
+                pe[pos][i] = math.cos(pos/(10000**(2*i/model_dimensions)))
+    return pe.reshape((1,seq_len,model_dimensions))
 
 
 # In[9]:
@@ -257,7 +244,7 @@ def generate_masks_for_illegal_positions(out_len):
     
     masks=np.zeros((out_len-1,out_len,out_len),dtype=np.float32)
     
-    for i in xrange(1,out_len):
+    for i in range(1,out_len):
         mask = np.zeros((out_len,out_len),dtype=np.float32)
         mask[i:out_len,:] = -2**30
         mask[:,i:out_len] = -2**30
@@ -298,7 +285,9 @@ def multihead_attention(Q,K,V,d,weights,filled=0,mask=False):
     Wv = weights['Wv']
     Wo = weights['Wo']
     
-    for i in xrange(0,h):
+    heads=[]
+    
+    for i in range(0,h):
         
         Q_w = tf.matmul(Q_,Wq[i])
         Q_w = tf.reshape(Q_w,[tf.shape(Q)[0],tf.shape(Q)[1],d])
@@ -311,14 +300,9 @@ def multihead_attention(Q,K,V,d,weights,filled=0,mask=False):
 
         head = attention(Q_w,K_w,V_w,d,filled,mask)
             
-        heads = heads.write(i,head)
+        heads.append(head)
         
-    heads = heads.stack()
-    
-    concated = heads[0]
-    
-    for i in xrange(1,h):
-        concated = tf.concat([concated,heads[i]],2)
+    concated = tf.concat(heads,axis=-1)
 
     concated = tf.reshape(concated,[-1,h*d])
     out = tf.matmul(concated,Wo)
@@ -330,6 +314,8 @@ def multihead_attention(Q,K,V,d,weights,filled=0,mask=False):
 
 # In[12]:
 
+
+max_text_len = 80
 
 def encoder(x,weights,attention_weights,dqkv):
 
@@ -344,6 +330,9 @@ def encoder(x,weights,attention_weights,dqkv):
     shift2 = weights['shift2']
     
     # SUBLAYER 1 (MASKED MULTI HEADED SELF ATTENTION)
+    
+    # positional_encoding 
+    x = x+ tf.constant(positional_encoding(max_text_len,word_vec_dim),tf.float32)[:,0:tf.shape(x)[1],0:tf.shape(x)[2]]
     
     sublayer1 = multihead_attention(x,x,x,dqkv,attention_weights)
     sublayer1 = tf.nn.dropout(sublayer1,keep_prob)
@@ -371,6 +360,7 @@ def encoder(x,weights,attention_weights,dqkv):
 # In[13]:
 
 
+max_summary_len = 5
 def decoder(y,enc_out,weights,masked_attention_weights,attention_weights,dqkv,mask=False,filled=0):
 
     W1 = weights['W1']
@@ -386,12 +376,18 @@ def decoder(y,enc_out,weights,masked_attention_weights,attention_weights,dqkv,ma
     shift3 = weights['shift3']
     
     # SUBLAYER 1 (MASKED MULTI HEADED SELF ATTENTION)
+    
+    # positional_encoding
+    y = y+ tf.constant(positional_encoding(max_summary_len,word_vec_dim),tf.float32)[:,0:max_summary_len,0:tf.shape(y)[2]]
 
     sublayer1 = multihead_attention(y,y,y,dqkv,masked_attention_weights,filled,mask)
     sublayer1 = tf.nn.dropout(sublayer1,keep_prob)
     sublayer1 = layer_norm(sublayer1 + y,scale1,shift1)
     
     # SUBLAYER 2 (MULTIHEADED ENCODER-DECODER INTERLAYER ATTENTION)
+    
+    sublayer1 = sublayer1+ tf.constant(positional_encoding(max_summary_len,word_vec_dim),tf.float32)[:,0:max_summary_len,0:word_vec_dim]
+    enc_out = enc_out + tf.constant(positional_encoding(max_text_len,word_vec_dim),tf.float32)[:,0:tf.shape(enc_out)[1],0:word_vec_dim]
     
     sublayer2 = multihead_attention(sublayer1,enc_out,enc_out,dqkv,attention_weights)
     sublayer2 = tf.nn.dropout(sublayer2,keep_prob)
@@ -421,7 +417,7 @@ def decoder(y,enc_out,weights,masked_attention_weights,attention_weights,dqkv,ma
 
 def stacked_encoders(layer_num,encoderin):
     
-    for i in xrange(0,layer_num):
+    for i in range(0,layer_num):
         
         encoder_weights = {
             
@@ -454,7 +450,7 @@ def stacked_encoders(layer_num,encoderin):
 
 def stacked_decoders(layer_num,decoderin,encoderout,filled):
     
-    for j in xrange(0,layer_num):
+    for j in range(0,layer_num):
         
         decoder_weights = {
             
@@ -513,11 +509,14 @@ def add_pred_to_output_list(decoderin_part_1,output,filled,out_probs,out_prob_di
     return decoderin_part_1,filled,out_probs
 
 
-
 # In[17]:
 
 
 def model(x,teacher_forcing=True):
+    
+    tf_embd = tf.convert_to_tensor(np_embd_limit)
+
+    x = tf.nn.embedding_lookup(tf_embd,x)
     
         
     # NOTE: tf.shape(x)[0] == batch_size
@@ -540,7 +539,7 @@ def model(x,teacher_forcing=True):
     # filled value is used to retrieve appropriate mask for illegal positions. 
     
     
-    tf_embd = tf.convert_to_tensor(np_embd_limit)
+   
     Wpd = tf.transpose(tf_embd)
     # Wpd the transpose of the output embedding matrix will be used to convert the decoder output
     # into a probability distribution over the output language vocabulary. 
@@ -589,7 +588,7 @@ def model(x,teacher_forcing=True):
         
         # Position Encoding the output
         
-        output = output + tf_pe_out[i]
+        #output = output + tf_pe_out[i]
         output = tf.reshape(output,[tf.shape(x)[0],1,word_vec_dim])
                                 
         
@@ -618,9 +617,14 @@ output = model(x,teacher_forcing)
 
 #OPTIMIZER
 
+trainables = tf.trainable_variables()
+beta=1e-7
+
+regularization = tf.reduce_sum([tf.nn.l2_loss(var) for var in trainables])
+
 cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=output, labels=y)
 cost = tf.multiply(cost,tf_pad_mask) #mask used to remove loss effect due to PADS
-cost = tf.reduce_mean(cost)
+cost = tf.reduce_mean(cost) + beta*regularization
 
 optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate,beta1=0.9,beta2=0.98,epsilon=1e-9).minimize(cost)
 
@@ -638,31 +642,24 @@ softmax_output = tf.nn.softmax(output)
 # In[19]:
 
 
-def transform_out(output_batch):
-    out = []
-    for output_text in output_batch:
-        output_len = len(output_text)
-        transformed_output = np.zeros([output_len],dtype=np.int32)
-        for i in xrange(0,output_len):
-            transformed_output[i] = vocab_limit.index(vec2word(output_text[i]))
-        out.append(transformed_output)
-    return np.asarray(out,np.int32)
+
 
 def create_pad_Mask(output_batch):
     pad_index = vocab_limit.index('<PAD>')
     mask = np.ones_like((output_batch),np.float32)
-    for i in xrange(len(mask)):
-        for j in xrange(len(mask[i])):
+    for i in range(len(mask)):
+        for j in range(len(mask[i])):
             if output_batch[i,j]==pad_index:
                 mask[i,j]=0
     return mask
 
 
-# In[ ]:
+# In[20]:
 
 
 import string
 import random
+import nltk
 from __future__ import print_function
 
 init = tf.global_variables_initializer()
@@ -673,25 +670,32 @@ with tf.Session() as sess: # Start Tensorflow Session
     # Prepares variable for saving the model
     sess.run(init) #initialize all variables
     step = 0   
-    best_loss = 999
-    display_step = 1
+    best_BLEU = 0
+    display_step = 100
     
     while step < epochs:
            
-        batch_len = len(train_batches_x_pe)
-        for i in xrange(0,batch_len):
+        batch_len = len(train_batches_x)
+        rand_idx = [idx for idx in range(batch_len)]
+        random.shuffle(rand_idx)
+        rand_idx = rand_idx[0:2000]
+        count=0
+        for i in rand_idx:
             
             sample_no = np.random.randint(0,batch_size)
-            print("\nCHOSEN SAMPLE NO.: "+str(sample_no))
             
-            train_out = transform_out(train_batches_y[i])
+            
+            #train_out = transform_out(train_batches_y[i])
 
-            if i%display_step==0:
-                print("\nEpoch: "+str(step+1)+" Iteration: "+str(i+1))
+            if count%display_step==0:
+                print("\nEpoch: "+str(step+1)+" Iteration: "+str(count+1))
+                print("\nCHOSEN SAMPLE NO.: "+str(sample_no))
                 print("\nSAMPLE TEXT:")
                 for vec in train_batches_x[i][sample_no]:
-                    print(str(vec2word(vec)),end=" ")
+                    print(str(vec2vocab[vec]),end=" ")
                 print("\n")
+                
+            
                 
             rand = random.randint(0,4) #determines chance of using Teacher Forcing
             if rand==2:
@@ -699,24 +703,137 @@ with tf.Session() as sess: # Start Tensorflow Session
             else:
                 random_bool = True
                 
-            output_seq_len = len(train_out[0])
+            output_seq_len = len(train_batches_y[i][0])
             
             illegal_position_masks = generate_masks_for_illegal_positions(output_seq_len)
             
-            pe_out = positional_encoding(output_seq_len,word_vec_dim)
-            pe_out = pe_out.reshape((output_seq_len,1,word_vec_dim))
+            pad_mask = create_pad_Mask(np.asarray(train_batches_y[i]))
             
-            pad_mask = create_pad_Mask(train_out)
+            train_batch_x = np.asarray(train_batches_x[i],np.int32)
+            train_batch_y = np.asarray(train_batches_y[i],np.int32)
+            
+            #print(train_batch_x.shape)
+            #print(train_batch_y.shape)
 
             # Run optimization operation (backpropagation)
-            _,loss,out = sess.run([optimizer,cost,softmax_output],feed_dict={x: train_batches_x_pe[i], 
-                                                                             y: train_out,
+            _,loss,out = sess.run([optimizer,cost,softmax_output],feed_dict={x: train_batch_x, 
+                                                                             y: train_batch_y,
                                                                              keep_prob: 0.9,
                                                                              output_len: output_seq_len,
                                                                              tf_illegal_position_masks: illegal_position_masks,
-                                                                             tf_pe_out: pe_out,
                                                                              tf_pad_mask: pad_mask,
                                                                              teacher_forcing: random_bool})
+            
+            if count%display_step==0:
+                print("\nPREDICTED SUMMARY OF THE SAMPLE:\n")
+                flag = 0
+                for array in out[sample_no]:
+                    
+                    #prediction_int = np.random.choice(range(vocab_len), p=array.ravel()) 
+                    #(^use this if you want some variety)
+                    #(or use this what's below:)
+                    
+                    prediction_int = np.argmax(array)
+                    
+                    if vocab_limit[prediction_int] in string.punctuation or flag==0: 
+                        print(str(vocab_limit[prediction_int]),end='')
+                    else:
+                        print(" "+str(vocab_limit[prediction_int]),end='')
+                    flag=1
+                print("\n")
+                
+                print("ACTUAL SUMMARY OF THE SAMPLE:\n")
+                for vec in train_batches_y[i][sample_no]:
+                    print(str(vec2vocab[vec]),end=" ")
+                print("\n")
+            
+                print("loss="+str(loss))
+                
+            count+=1
+                
+        print("\n\nSTARTING VALIDATION\n\n")
+                
+        batch_len = len(val_batches_x)
+        #print(batch_len)
+        total_BLEU_argmax=0
+        
+        total_len=0
+        for i in range(0,batch_len):
+            
+            sample_no = np.random.randint(0,batch_size)
+            
+            
+            #train_out = transform_out(train_batches_y[i])
+
+            if i%display_step==0:
+                print("\nEpoch: "+str(step+1)+" Iteration: "+str(i+1))
+                print("\nCHOSEN SAMPLE NO.: "+str(sample_no))
+                print("\nSAMPLE TEXT:")
+                for vec in val_batches_x[i][sample_no]:
+                    print(str(vec2vocab[vec]),end=" ")
+                print("\n")
+                
+            output_seq_len = len(val_batches_y[i][0])
+            
+            illegal_position_masks = generate_masks_for_illegal_positions(output_seq_len)
+            
+            pad_mask = create_pad_Mask(np.asarray(val_batches_y[i]))
+            
+            val_batch_x = np.asarray(val_batches_x[i],np.int32)
+            val_batch_y = np.asarray(val_batches_y[i],np.int32)
+            
+            #print(train_batch_x.shape)
+            #print(train_batch_y.shape)
+
+            loss,out = sess.run([cost,softmax_output],feed_dict={x: val_batch_x, 
+                                                                 y: val_batch_y,
+                                                                 keep_prob: 1,
+                                                                 output_len: output_seq_len,
+                                                                 tf_illegal_position_masks: illegal_position_masks,
+                                                                 tf_pad_mask: pad_mask,
+                                                                 teacher_forcing: 0})
+            
+            batch_summaries = val_batch_y
+            batch_argmax_preds = np.argmax(out,axis=-1)
+
+            batch_BLEU_argmax = 0
+            batch_BLEU_argmax_list=[]
+            
+            for summary, argmax_pred in zip(batch_summaries, batch_argmax_preds):
+
+                str_summary = []
+                str_argmax_pred = []
+                gold_EOS_flag = 0
+
+                for t in range(len(summary)):
+
+                    if gold_EOS_flag == 0:
+
+                        gold_idx = summary[t]
+                        argmax_idx = argmax_pred[t]
+
+                        if vec2vocab.get(gold_idx, vocab_dict['<UNK>']) == "<EOS>":
+                            gold_EOS_flag = 1
+                        else:
+                            str_summary.append(str(gold_idx))
+                            str_argmax_pred.append(str(argmax_idx))
+
+                if len(str_summary) < 2:
+                    n_gram = len(str_summary)
+                else:
+                    n_gram = 2
+
+                weights = [1/n_gram for id in range(n_gram)]
+                weights = tuple(weights)
+
+                BLEU_argmax = nltk.translate.bleu_score.sentence_bleu(
+                    [str_summary], str_argmax_pred, weights=weights)
+
+                batch_BLEU_argmax += BLEU_argmax
+                batch_BLEU_argmax_list.append(BLEU_argmax)
+
+            total_BLEU_argmax += batch_BLEU_argmax
+            total_len += batch_size
             
             if i%display_step==0:
                 print("\nPREDICTED SUMMARY OF THE SAMPLE:\n")
@@ -737,15 +854,157 @@ with tf.Session() as sess: # Start Tensorflow Session
                 print("\n")
                 
                 print("ACTUAL SUMMARY OF THE SAMPLE:\n")
-                for vec in batches_y[i][sample_no]:
-                    print(str(vec2word(vec)),end=" ")
+                for vec in val_batches_y[i][sample_no]:
+                    print(str(vec2vocab[vec]),end=" ")
                 print("\n")
             
-            print("loss="+str(loss))
-                  
-            if(loss<best_loss):
-                best_loss = loss
-                saver.save(sess, 'Model_Backup/allattmodel.ckpt')
+                print("loss="+str(loss))
+                print("BLEU-2=",batch_BLEU_argmax_list[sample_no])
+        
+        avg_BLEU = total_BLEU_argmax/total_len
+        print("AVERAGE VALIDATION BLEU:",avg_BLEU)
+        
+        if(avg_BLEU>=best_BLEU):
+            best_BLEU = avg_BLEU
+            saver.save(sess, 'Model_Backup/allattmodel.ckpt')
+            print("\nCheckpoint Created\n")
 
         step=step+1
     
+
+
+# In[25]:
+
+
+# TESTING
+
+init = tf.global_variables_initializer()
+
+
+with tf.Session() as sess: # Start Tensorflow Session
+    
+    saver = tf.train.Saver() 
+    
+    saver.restore(sess, 'Model_Backup/allattmodel.ckpt')
+    #sess.run(init) #initialize all variables
+    print("\nCheckpoint Restored\n")
+    step = 0   
+    best_BLEU = 0
+    display_step = 100
+
+                
+    print("\n\nSTARTING TEST\n\n")
+
+    batch_len = len(test_batches_x)
+    #print(batch_len)
+    total_BLEU_argmax=0
+
+    total_len=0
+    for i in range(0,batch_len):
+
+        sample_no = np.random.randint(0,batch_size)
+
+
+        #train_out = transform_out(train_batches_y[i])
+
+        if i%display_step==0:
+            print("\nEpoch: "+str(step+1)+" Iteration: "+str(i+1))
+            print("\nCHOSEN SAMPLE NO.: "+str(sample_no))
+            print("\nSAMPLE TEXT:")
+            for vec in test_batches_x[i][sample_no]:
+                print(str(vec2vocab[vec]),end=" ")
+            print("\n")
+
+        output_seq_len = len(test_batches_y[i][0])
+
+        illegal_position_masks = generate_masks_for_illegal_positions(output_seq_len)
+
+        pad_mask = create_pad_Mask(np.asarray(test_batches_y[i]))
+
+        test_batch_x = np.asarray(test_batches_x[i],np.int32)
+        test_batch_y = np.asarray(test_batches_y[i],np.int32)
+
+        #print(train_batch_x.shape)
+        #print(train_batch_y.shape)
+
+        loss,out = sess.run([cost,softmax_output],feed_dict={x: test_batch_x, 
+                                                             y: test_batch_y,
+                                                             keep_prob: 1,
+                                                             output_len: output_seq_len,
+                                                             tf_illegal_position_masks: illegal_position_masks,
+                                                             tf_pad_mask: pad_mask,
+                                                             teacher_forcing: 0})
+
+        batch_summaries = test_batch_y
+        batch_argmax_preds = np.argmax(out,axis=-1)
+
+        batch_BLEU_argmax = 0
+        batch_BLEU_argmax_list=[]
+
+        for summary, argmax_pred in zip(batch_summaries, batch_argmax_preds):
+
+            str_summary = []
+            str_argmax_pred = []
+            gold_EOS_flag = 0
+
+            for t in range(len(summary)):
+
+                if gold_EOS_flag == 0:
+
+                    gold_idx = summary[t]
+                    argmax_idx = argmax_pred[t]
+
+                    if vec2vocab.get(gold_idx, vocab_dict['<UNK>']) == "<EOS>":
+                        gold_EOS_flag = 1
+                    else:
+                        str_summary.append(str(gold_idx))
+                        str_argmax_pred.append(str(argmax_idx))
+
+            if len(str_summary) < 2:
+                n_gram = len(str_summary)
+            else:
+                n_gram = 2
+
+            weights = [1/n_gram for id in range(n_gram)]
+            weights = tuple(weights)
+
+            BLEU_argmax = nltk.translate.bleu_score.sentence_bleu(
+                [str_summary], str_argmax_pred, weights=weights)
+
+            batch_BLEU_argmax += BLEU_argmax
+            batch_BLEU_argmax_list.append(BLEU_argmax)
+
+        total_BLEU_argmax += batch_BLEU_argmax
+        total_len += batch_size
+
+        if i%display_step==0:
+            print("\nPREDICTED SUMMARY OF THE SAMPLE:\n")
+            flag = 0
+            for array in out[sample_no]:
+
+                #prediction_int = np.random.choice(range(vocab_len), p=array.ravel()) 
+                #(^use this if you want some variety)
+                #(or use this what's below:)
+
+                prediction_int = np.argmax(array)
+
+                if vocab_limit[prediction_int] in string.punctuation or flag==0: 
+                    print(str(vocab_limit[prediction_int]),end='')
+                else:
+                    print(" "+str(vocab_limit[prediction_int]),end='')
+                flag=1
+            print("\n")
+
+            print("ACTUAL SUMMARY OF THE SAMPLE:\n")
+            for vec in test_batches_y[i][sample_no]:
+                print(str(vec2vocab[vec]),end=" ")
+            print("\n")
+
+            print("loss="+str(loss))
+            print("BLEU-2=",batch_BLEU_argmax_list[sample_no])
+
+    avg_BLEU = total_BLEU_argmax/total_len
+    print("AVERAGE TEST BLEU:",avg_BLEU)
+
+    
+
