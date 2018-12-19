@@ -13,15 +13,9 @@ This implementation is mostly based on the model as proposed in the paper, but t
 
 Unlike the previous models ([this](https://github.com/JRC1995/Abstractive-Summarization) and [this](https://github.com/JRC1995/Attention-Everywhere)) I used for abstractive summarization, this one is set up for mini-batch training.
 
-Note:
-
-* I am using different hyperparameters. 
-* I am using low dimensional GloVe embeddings, and less no. of layers.
-* This implementation is untrained. I may train it, and polish the code later. 
 
 ## Tested with:
 
-* Python 2.7.1
-* Tensorflow 1.3
-* Numpy 1.13.3
+* Python 3.6
+* Tensorflow 1.12
 
