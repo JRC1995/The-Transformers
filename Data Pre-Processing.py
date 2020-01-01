@@ -1,110 +1,46 @@
-
+#!/usr/bin/env python
 # coding: utf-8
 
 # In[1]:
 
 
 import numpy as np
-from __future__ import division
 
-filename = 'glove.6B.300d.txt' 
+
+filename = 'glove.6B.100d.txt' 
 # (glove data set from: https://nlp.stanford.edu/projects/glove/)
 
-#filename = 'numberbatch-en.txt'
-#(https://github.com/commonsense/conceptnet-numberbatch)
+def loadEmbeddings(filename):
+    vocab2embd = {}
 
-def loadembeddings(filename):
-    vocab = []
-    embd = []
-    file = open(filename,'r')
-    for line in file.readlines():
-        row = line.strip().split(' ')
-        vocab.append(row[0])
-        embd.append(row[1:])
-    print('Word vector embeddings Loaded.')
-    file.close()
-    return vocab,embd
+    with open(filename) as infile:
+        for line in infile:
+            row = line.strip().split(' ')
+            word = row[0].lower()
+            # print(word)
+            if word not in vocab2embd:
+                vec = np.asarray(row[1:], np.float32)
+                if len(vec) == 100:
+                    vocab2embd[word] = vec
+
+    print('Embedding Loaded.')
+        
+    return vocab2embd
 
 # Pre-trained word embedding
-vocab,embd = loadembeddings(filename)
+vocab2embd = loadEmbeddings(filename)
 
-word_vec_dim = len(embd[0]) # word_vec_dim = dimension of each word vectors
-
-#e = np.zeros((word_vec_dim,),np.float32)+0.0001
-
-vocab.append('<UNK>') #<UNK> represents unknown word
-embdunk = np.random.randn(word_vec_dim) #np.asarray(embd[vocab.index('unk')],np.float32)+e
-    
-vocab.append('<EOS>') #<EOS> represents end of sentence
-embdeos = np.random.randn(word_vec_dim) #np.asarray(embd[vocab.index('eos')],np.float32)+e
-
-vocab.append('<PAD>') #<PAD> represents paddings
+word_vec_dim = 100 # word_vec_dim = dimension of each word vectors
 
 
-embd.append(embdunk)  
-embd.append(embdeos)  
-    
-embdpad = np.zeros(word_vec_dim)
-embd.append(embdpad)
-
-embedding = np.asarray(embd)
-embedding = embedding.astype(np.float32)
+vocab2embd['<UNK>'] = np.random.randn(word_vec_dim)
+vocab2embd['<GO>'] = np.random.randn(word_vec_dim)
+vocab2embd['<PRED>'] = np.random.randn(word_vec_dim)
+vocab2embd['<EOS>'] = np.random.randn(word_vec_dim)
+vocab2embd['<PAD>'] = np.zeros(word_vec_dim)
 
 
 # In[2]:
-
-
-def word2vec(word):  # converts a given word into its vector representation
-    if word in vocab:
-        return embedding[vocab.index(word)]
-    else:
-        return embedding[vocab.index('<UNK>')]
-
-
-# In[3]:
-
-
-def most_similar_cosine(x):
-    #embed = embedding[0:len(embedding)-1]
-    embed = embedding
-    xdoty = np.multiply(embed,x) #element-wise
-    xdoty = np.sum(xdoty,1)
-    xlen = np.square(x)
-    xlen = np.sum(xlen,0)
-    xlen = np.sqrt(xlen)
-    ylen = np.square(embed)
-    ylen = np.sum(ylen,1)
-    ylen = np.sqrt(ylen)
-    xlenylen = np.multiply(xlen,ylen)
-    cosine_similarities = np.divide(xdoty,xlenylen)
-    return np.flip(np.argsort(cosine_similarities),0)
-
-def most_similar_eucli(x):
-    xminusy = np.subtract(embedding,x)
-    sq_xminusy = np.square(xminusy)
-    sum_sq_xminusy = np.sum(sq_xminusy,1)
-    eucli_dists = np.sqrt(sum_sq_xminusy)
-    return np.argsort(eucli_dists)
-
-word = 'frog'
-
-most_similars = most_similar_eucli(word2vec(word))
-
-print("TOP TEN MOST SIMILAR WORDS TO '"+str(word)+"':\n")
-for i in range(0,10):
-    print(str(i+1)+". "+str(vocab[most_similars[i]]))
-    
-
-
-# In[4]:
-
-
-def vec2word(vec):   # converts a given vector representation into the represented word 
-    most_similars = most_similar_eucli(np.asarray(vec,np.float32))
-    return vocab[most_similars[0]]
-
-
-# In[5]:
 
 
 import csv
@@ -120,10 +56,11 @@ def clean(text):
     text = text.lower()
     printable = set(string.printable)
     text = "".join(list(filter(lambda x: x in printable, text))) #filter funny characters, if any.
-    #print(text)
-    text = text.translate(str.maketrans('', '',string.punctuation))
-    #print(text)
     return text
+
+counter={}
+max_len_text = 100
+max_len_sum = 20
 
 #max_data = 100000
 i=0
@@ -132,80 +69,57 @@ with open('Reviews.csv', 'rt') as csvfile: #Data from https://www.kaggle.com/sna
     count=0
     for row in Reviews:
         #if count<max_data:
-        clean_text = clean(row['Text'])
-        clean_summary = clean(row['Summary'])
-        summaries.append(word_tokenize(clean_summary))
-        texts.append(word_tokenize(clean_text))
+        clean_text = word_tokenize(clean(row['Text']))
+        clean_summary = word_tokenize(clean(row['Summary']))
+        
+        if len(clean_text) <= max_len_text and len(clean_summary) <= max_len_sum:
+            
+            for word in clean_text:
+                if word in vocab2embd:
+                    counter[word]=counter.get(word,0)+1
+            for word in clean_summary:
+                if word in vocab2embd:
+                    counter[word]=counter.get(word,0)+1
+
+            summaries.append(clean_summary)
+            texts.append(clean_text)
         #count+=1
         if i%10000==0:
             print("Processing data {}".format(i))
         i+=1
-
-
-# In[6]:
-
-
-i = 0
-texts_v2 = []
-summaries_v2 = []
-
-max_len_text = 80
-max_len_sum = 4
-for text in texts:
-    if(len(text)<=max_len_text and len(summaries[i])<=max_len_sum): 
-        #remove data pairs with review length more than max_len_text
-        #or summary length more than max_len_sum
-        texts_v2.append(text)
-        summaries_v2.append(summaries[i])
-    i+=1
-    
-print("Current size of data: "+str(len(texts_v2)))
-
-
-# In[7]:
-
-
-vocab_dict = {word:i for i,word in enumerate(vocab)}
-
-
-# In[8]:
-
-
-i = 0
-texts = []
-summaries = []
-
-for summary in summaries_v2:
-    flag = 0    
-    for word in summary:
-        if word not in vocab_dict:
-            flag = 1
-            
-    #Remove summary and its corresponding text 
-    #if out of vocabulary word present in summary
-    
-    if flag == 0:
-        summaries.append(summary)
-        texts.append(texts_v2[i])
-    i+=1
-
+        
 print("Current size of data: "+str(len(texts)))
 
 
-# In[9]:
+# In[3]:
 
 
-"""
-#REDUCE DATA (FOR SPEEDING UP THE NEXT STEPS)
 
-MAXIMUM_DATA_NUM = 20000
-
-texts = texts_v3[0:MAXIMUM_DATA_NUM]
-summaries = summaries_v3[0:MAXIMUM_DATA_NUM]
-"""
+vocab = [word for word in counter]
 
 
-# In[10]:
+counts = [counter[word] for word in vocab]
+
+sorted_idx = sorted(range(len(counts)), key=counts.__getitem__)
+sorted_idx.reverse()
+
+vocab = [vocab[idx] for idx in sorted_idx]
+
+special_tags = ["<UNK>","<GO>","<PRED>","<EOS>","<PAD>"]
+if len(vocab) > 40000-len(special_tags):
+    vocab = vocab[0:40000-len(special_tags)]
+    
+
+vocab += special_tags 
+
+vocab_dict = {word:i for i,word in enumerate(vocab)}
+
+embeddings = []
+for word in vocab:
+    embeddings.append(vocab2embd[word].tolist())
+
+
+# In[4]:
 
 
 # SHUFFLE
@@ -219,7 +133,7 @@ texts = [texts[idx] for idx in texts_idx]
 summaries = [summaries[idx] for idx in texts_idx]
 
 
-# In[11]:
+# In[5]:
 
 
 import random
@@ -230,7 +144,7 @@ print("SAMPLE CLEANED & TOKENIZED TEXT: \n\n"+str(texts[index]))
 print("\nSAMPLE CLEANED & TOKENIZED SUMMARY: \n\n"+str(summaries[index]))
 
 
-# In[12]:
+# In[6]:
 
 
 train_len = int(.7*len(texts))
@@ -246,92 +160,127 @@ test_summaries = summaries[train_len+val_len:]
 test_texts = texts[train_len+val_len:]
 
 
-# In[13]:
+# In[7]:
 
 
-def bucket_and_batch(texts,summaries):
-    lentexts = []
-
-    i=0
-    for text in texts:
-        lentexts.append(len(text))
-        i+=1
-        
-    #print(len(texts))
-    #print(len(summaries))
-
-    sortedindex = np.flip(np.argsort(lentexts),axis=0)
-    #sort indexes according to the sequence length of corresponding texts. 
+def bucket_and_batch(texts, summaries, batch_size=32):
     
-    batch_size = 50
+    global vocab_dict
+    vocab2idx = vocab_dict
+    
+    PAD = vocab2idx['<PAD>']
+    EOS = vocab2idx['<EOS>']
+    UNK = vocab2idx['<UNK>']
 
-    bi=0
+    true_seq_lens = np.zeros((len(texts)), dtype=int)
+    for i in range(len(texts)):
+        true_seq_lens[i] = len(texts[i])
 
-    batches_x = []
-    batches_y = []
-    batch_x = []
-    batch_y = []
+    # sorted in descending order after flip
+    sorted_by_len_indices = np.flip(np.argsort(true_seq_lens), 0)
 
-    for i in range(0,len(texts)):
+    sorted_texts = []
+    sorted_summaries = []
 
-        if bi>=batch_size:
-            bi=0
-            #print(batch_x)
-            #print(batch_y)
-            batches_x.append(batch_x)
-            batches_y.append(batch_y)
-            batch_x = []
-            batch_y = []
+    for i in range(len(texts)):
+        sorted_texts.append(texts[sorted_by_len_indices[i]])
+        sorted_summaries.append(summaries[sorted_by_len_indices[i]])
+
+    i = 0
+    batches_texts = []
+    batches_summaries = []
+    batches_true_seq_in_lens = []
+    batches_true_seq_out_lens = []
+
+    while i < len(sorted_texts):
+
+        if i+batch_size > len(sorted_texts):
+            batch_size = len(sorted_texts)-i
+
+        batch_texts = []
+        batch_summaries = []
+        batch_true_seq_in_lens = []
+        batch_true_seq_out_lens = []
+
+        max_in_len = len(sorted_texts[i])
+        max_out_len = max([len(sorted_summaries[j])+1 for j in range(i,i+batch_size)])
+
+        for j in range(i, i + batch_size):
+
+            text = sorted_texts[j]
+            summary = sorted_summaries[j]
             
-        if bi==0:
-            max_len = len(texts[int(sortedindex[i])])
-        
-        text = []
-        summary = []
-        
-        for j in range(0,max_len):
-            if j==len(texts[int(sortedindex[i])]):
-                text.append(vocab_dict['<EOS>'])
-            elif j > len(texts[int(sortedindex[i])]):
-                text.append(vocab_dict['<PAD>'])
-            else:
-                text.append(vocab_dict.get(texts[int(sortedindex[i])][j],vocab_dict['<UNK>']))
+            text = [vocab2idx.get(word,UNK) for word in text]
+            summary = [vocab2idx.get(word,UNK) for word in summary]
+            
+            init_in_len = len(text)
+            init_out_len = len(summary)+1 # +1 for EOS
+
+            while len(text) < max_in_len:
+                text.append(PAD)
                 
-        for j in range(0,5):
-            if j==len(summaries[int(sortedindex[i])]):
-                summary.append(vocab_dict['<EOS>'])
-            elif j > len(summaries[int(sortedindex[i])]):
-                summary.append(vocab_dict['<PAD>'])
-            else:
-                summary.append(vocab_dict.get(summaries[int(sortedindex[i])][j],vocab_dict['<UNK>']))
-                
+            summary.append(EOS)
+            
+            while len(summary) < max_out_len:
+                summary.append(PAD)
 
-        batch_x.append(text)
-        batch_y.append(summary)
+            batch_summaries.append(summary)
+            batch_texts.append(text)
+            batch_true_seq_in_lens.append(init_in_len)
+            batch_true_seq_out_lens.append(init_out_len)
 
-        bi+=1
-        
-    return batches_x,batches_y
-    
+        #batch_texts = np.asarray(batch_texts, dtype=np.int32)
+        #batch_summaries = np.asarray(batch_summaries, dtype=np.int32)
+        #batch_true_seq_in_lens = np.asarray(batch_true_seq_in_lens, dtype=np.int32)
+        #batch_true_seq_out_lens = np.asarray(batch_true_seq_out_lens, dtype=np.int32)
+
+        batches_texts.append(batch_texts)
+        batches_summaries.append(batch_summaries)
+        batches_true_seq_in_lens.append(batch_true_seq_in_lens)
+        batches_true_seq_out_lens.append(batch_true_seq_out_lens)
+
+        i += batch_size
+
+    return batches_texts, batches_summaries, batches_true_seq_in_lens, batches_true_seq_out_lens
 
 
-# In[14]:
+# In[8]:
 
 
-train_batches_x,train_batches_y = bucket_and_batch(train_texts,train_summaries)
-val_batches_x,val_batches_y = bucket_and_batch(val_texts,val_summaries)
-test_batches_x,test_batches_y = bucket_and_batch(test_texts,test_summaries)
+train_batches_x,train_batches_y,train_batches_in_lens, train_batches_out_lens = bucket_and_batch(train_texts,train_summaries)
+val_batches_x,val_batches_y,val_batches_in_lens,val_batches_out_lens= bucket_and_batch(val_texts,val_summaries)
+test_batches_x,test_batches_y,test_batches_in_lens,test_batches_out_lens= bucket_and_batch(test_texts,test_summaries)
 
 
-# In[15]:
+# In[9]:
 
 
 #Saving processed data in another file.
 
-import pickle
+import json
 
-PICK = [vocab,embd,50,train_batches_x,train_batches_y,val_batches_x,val_batches_y,test_batches_x,test_batches_y]
+diction = {}
+diction['vocab']=vocab
+diction['embd']=embeddings
+diction['train_batches_x']=train_batches_x
+diction['train_batches_y']=train_batches_y
+diction['train_batches_in_len'] = train_batches_in_lens
+diction['train_batches_out_len'] = train_batches_out_lens
+diction['val_batches_x']=val_batches_x
+diction['val_batches_y']=val_batches_y
+diction['val_batches_in_len'] = val_batches_in_lens
+diction['val_batches_out_len'] = val_batches_out_lens
+diction['test_batches_x']=test_batches_x
+diction['test_batches_y']=test_batches_y
+diction['test_batches_in_len'] = test_batches_in_lens
+diction['test_batches_out_len'] = test_batches_out_lens
 
-with open('AmazonPICKLE', 'wb') as fp:
-    pickle.dump(PICK, fp)
+with open('ProcessedData.json', 'w') as fp:
+    json.dump(diction, fp)
+
+
+# In[ ]:
+
+
+
 
